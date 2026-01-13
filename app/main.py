@@ -1,17 +1,27 @@
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+
 from fastapi import FastAPI, HTTPException, status
 from scalar_fastapi import get_scalar_api_reference
 
-from .database import Database
+# from .database import Database
+from .database.models import Shipment, ShipmentStatus
+from .database.session import SessionDep, create_db_tables
 from .schemas import ShipmentCreate, ShipmentRead, ShipmentUpdate
 
-app = FastAPI()
 
-db = Database()
+@asynccontextmanager
+async def lifespan_handler(app: FastAPI):
+    create_db_tables()
+    yield
+
+
+app = FastAPI(lifespan=lifespan_handler)
 
 
 @app.get("/shipment", response_model=ShipmentRead)
-def get_shipment(id: int):
-    shipment = db.get(id)
+def get_shipment(id: int, session: SessionDep):
+    shipment = session.get(Shipment, id)
     if shipment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
@@ -19,22 +29,42 @@ def get_shipment(id: int):
 
 
 @app.post("/shipment")
-def submip_shipment(shipment: ShipmentCreate) -> dict[str, int]:
-    new_id = db.create(shipment)
+def submip_shipment(shipment: ShipmentCreate, session: SessionDep) -> dict[str, int]:
+    new_shipment = Shipment(
+        **shipment.model_dump(),
+        status=ShipmentStatus.placed,
+        estimated_delivery=datetime.now() + timedelta(days=3),
+    )
+    session.add(new_shipment)
+    session.commit()
+    session.refresh(new_shipment)
 
-    return {"id": new_id}
+    return {"id": new_shipment.id}
 
 
 @app.patch("/shipment", response_model=ShipmentRead)
-def update_shipment(id: int, shipment: ShipmentUpdate):
-    updated = db.update(id, shipment)
-    return updated
+def update_shipment(id: int, updated_shipment: ShipmentUpdate, session: SessionDep):
+    updated = updated_shipment.model_dump(exclude_none=True)
+
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No data provided."
+        )
+
+    shipment = session.get(Shipment, id)
+    shipment.sqlmodel_update(updated)
+
+    session.add(shipment)
+    session.commit()
+    session.refresh(shipment)
+
+    return shipment
 
 
 @app.delete("/shipment")
-def delete_shipment(id: int) -> dict[str, str]:
-    db.delete(id)
-
+def delete_shipment(id: int, session: SessionDep) -> dict[str, str]:
+    session.delete(session.get(Shipment, id))
+    session.commit()
     return {"detail": f"shipment with id: {id} is deleted"}
 
 
