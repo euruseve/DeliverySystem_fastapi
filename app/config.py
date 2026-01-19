@@ -1,5 +1,9 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_base_config = SettingsConfigDict(
+    env_file="./.env", env_ignore_empty=True, extra="ignore"
+)
+
 
 class DbSettings(BaseSettings):
     POSTGRES_USER: str
@@ -8,13 +12,19 @@ class DbSettings(BaseSettings):
     POSTGRES_PORT: int
     POSTGRES_DB: str
 
-    model_config = SettingsConfigDict(
-        env_file="./.env", env_ignore_empty=True, extra="ignore"
-    )
+    model_config = _base_config
 
     @property
     def postgres_url(self):
         return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
 
 
-settings = DbSettings()
+class SecuritySettings(BaseSettings):
+    JWT_SECRET: str
+    JWT_ALGORITHM: str
+
+    model_config = _base_config
+
+
+db_settings = DbSettings()
+sec_settings = SecuritySettings()
